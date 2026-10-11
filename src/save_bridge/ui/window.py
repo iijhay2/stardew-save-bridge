@@ -552,7 +552,7 @@ class BridgeWindow(QMainWindow):
             "1. Close Stardew Valley on both devices.\n"
             "2. Connect and unlock your iPad with a USB cable.\n"
             "3. Tap Trust This Computer if asked.\n"
-            "4. Install compatible macFUSE and ifuse tools, then click Refresh Saves.\n\n"
+            "4. Install libimobiledevice and ideviceinstaller, then click Refresh Saves.\n\n"
             "The app only opens Stardew Valley's File Sharing Documents folder.",
         )
 

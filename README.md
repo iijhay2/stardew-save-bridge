@@ -4,7 +4,7 @@ A small macOS app for choosing **one Stardew Valley farm** and copying its compl
 
 ![Farm Journal showing two example farms and their Mac/iPad money](docs/farm-journal-preview.png)
 
-> **Hardware status:** The app, local backup and restore flow, and sample-device transfers have been tested. A real iPad Documents mount and write have **not** yet been verified on this machine. Use a disposable farm for the [hardware acceptance steps](docs/hardware-acceptance.md) before transferring a real save.
+> **Hardware status:** Direct USB reading has been verified with two real iPad farms on macOS 27. Upload, readback, replacement, and cleanup passed with a disposable test folder in Stardew's shared Documents area. The full in-game transfer checklist still needs a disposable farm before relying on this with a real save; see [hardware acceptance](docs/hardware-acceptance.md).
 
 ## What it does
 
@@ -24,8 +24,7 @@ The app is local only. There is no account, cloud sync, telemetry, or background
 | [Python 3.11 or newer](https://www.python.org/downloads/macos/) | Builds the iconed app on each workstation. Python 3.14 is the version used for the current build. |
 | Stardew Valley on the Mac and iPad | The Mac copy is read from `~/.config/StardewValley/Saves`. The iPad edition must expose its Documents folder through normal File Sharing. |
 | USB cable and a trusted, unlocked iPad | USB access is deliberate; the app does not use network pairing. |
-| [libimobiledevice](https://libimobiledevice.org/) | Detects the iPad and checks its connection. |
-| [macFUSE](https://macfuse.github.io/2026/09/07/macfuse-5.4.0.html) and [ifuse](https://github.com/libimobiledevice/ifuse) | Mount only Stardew Valley's File Sharing Documents folder. |
+| [libimobiledevice](https://github.com/libimobiledevice/libimobiledevice) and [ideviceinstaller](https://github.com/libimobiledevice/ideviceinstaller) | Detect the iPad, find Stardew Valley's File Sharing app, and read/write its Documents folder over USB. No filesystem driver or kernel setting change is needed. |
 
 The app opens and shows Mac farms without iPad tools. Transfer buttons stay disabled until the iPad can be scanned.
 
@@ -50,15 +49,13 @@ The app opens and shows Mac farms without iPad tools. Transfer buttons stay disa
    open "$HOME/Applications/Stardew Save Bridge.app"
    ```
 
-3. For iPad transfers, install [Homebrew](https://brew.sh/) if needed, then install the USB tools and follow any macFUSE prompts from macOS:
+3. For iPad transfers, install [Homebrew](https://brew.sh/) if needed, then install the USB tools:
 
    ```bash
-   brew install libimobiledevice
-   brew install --cask macfuse
-   brew install gromgit/fuse/ifuse-mac
+   brew install libimobiledevice ideviceinstaller
    ```
 
-   The [Homebrew libimobiledevice formula](https://formulae.brew.sh/formula/libimobiledevice) provides the device tools. The [macOS-specific ifuse formula](https://github.com/gromgit/homebrew-fuse/blob/main/Formula/ifuse-mac.rb) depends on macFUSE; this combination has **not** yet been verified on macOS 27. Follow the [USB setup guide](docs/ipad-usb-setup.md) if installation or device discovery fails. The app also looks for tools in Homebrew and MacPorts locations when launched from Finder.
+   The [libimobiledevice formula](https://formulae.brew.sh/formula/libimobiledevice) includes `afcclient`; [ideviceinstaller](https://formulae.brew.sh/formula/ideviceinstaller) provides app discovery. The app also looks for tools in Homebrew and MacPorts locations when launched from Finder. See the [USB setup guide](docs/ipad-usb-setup.md) for connection checks.
 
 4. Connect and unlock the iPad, tap **Trust This Computer** if prompted, close Stardew Valley on both devices, and run the read-only check:
 
@@ -66,7 +63,7 @@ The app opens and shows Mac farms without iPad tools. Transfer buttons stay disa
    PYTHONPATH=src .venv/bin/python scripts/check_prerequisites.py
    ```
 
-   The check should name Stardew Valley in File Sharing, list visible folders, and unmount cleanly. If it cannot, you can still inspect Mac farms and restore existing Mac backups; see [known limitations](docs/known-limitations.md).
+   The check should name Stardew Valley in File Sharing and list visible farm folders. It only reads them and deletes its temporary Mac snapshot afterward. If it cannot connect, you can still inspect Mac farms and restore existing Mac backups; see [known limitations](docs/known-limitations.md).
 
 ## Transfer a farm
 
@@ -112,12 +109,12 @@ The local app uses an ad hoc signature. General distribution through macOS Gatek
 
 ## Safety and scope
 
-The app uses [ifuse's documented `--list-apps` and `--documents` flow](https://github.com/libimobiledevice/ifuse) to access a File Sharing folder. It does not use `--root`, `--container`, jailbreak access, game save editing, automatic conflict resolution, or background sync. It identifies `_old`, `_SVBAK`, and `_SVEMERG` files but transfers only a selected standard whole farm folder. A disconnect during an iPad write may still require manual recovery; see [known limitations](docs/known-limitations.md).
+The app uses [libimobiledevice's `afcclient` HouseArrest support](https://github.com/libimobiledevice/libimobiledevice) to access Stardew Valley's File Sharing Documents folder directly over USB. It does not mount a volume, change kernel settings, use `--root` or `--container`, jailbreak access, edit save contents, resolve conflicts automatically, or sync in the background. It identifies `_old`, `_SVBAK`, and `_SVEMERG` files but transfers only a selected standard whole farm folder. A disconnect during an iPad write may still require manual recovery; see [known limitations](docs/known-limitations.md).
 
 ## Design and credits
 
 - The four-color theme comes from this [Color Hunt palette](https://colorhunt.co/palette/f6e2e9fefaf3b8cfb384a282): `#F6E2E9`, `#FEFAF3`, `#B8CFB3`, and `#84A282`. Darker shades are used where text or action states need more contrast.
 - The square borders and offset shadows are inspired by [RetroUI](https://retroui.io/). RetroUI is a React/Tailwind library; this native app recreates the visual direction in Qt and does not bundle its components.
 - The interface uses [Qt for Python / PySide6](https://doc.qt.io/qtforpython-6/). The installable Mac app is made with [PyInstaller](https://pyinstaller.org/en/stable/).
-- iPad access relies on the open [libimobiledevice](https://libimobiledevice.org/), [ifuse](https://github.com/libimobiledevice/ifuse), and [macFUSE](https://macfuse.github.io/) projects. Their installation and licenses are separate from this repository.
+- iPad access relies on the open [libimobiledevice](https://github.com/libimobiledevice/libimobiledevice) and [ideviceinstaller](https://github.com/libimobiledevice/ideviceinstaller) projects. Their installation and licenses are separate from this repository.
 - The pixel flower artwork and app icon in this repository were drawn for this project. The screenshot uses disposable example farms. This is an unofficial Stardew Valley utility and is not affiliated with the game creators.

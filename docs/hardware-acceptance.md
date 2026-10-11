@@ -2,7 +2,7 @@
 
 Use a disposable test farm on both devices. Independently copy any real farm outside the app before beginning. Do not test writes against the normal farm.
 
-1. Run the read-only prerequisite script. Confirm the exact Stardew File Sharing app ID, visible farm folders, and clean unmount.
+1. Run the read-only prerequisite script. Confirm the exact Stardew File Sharing app ID and visible farm folders. The temporary Mac snapshot should be removed when the check ends.
 2. Launch the app with no iPad, then reconnect and unlock it. Confirm the status text changes and no transfer is enabled while access is unavailable.
 3. With at least two disposable farm saves, choose each row and confirm farm name, player, money, folder ID, and both device copies refer to the intended farm.
 4. Make different progress in the Mac and iPad copies. Select Mac as source, prepare, inspect both verified backup paths, confirm the target, and transfer.

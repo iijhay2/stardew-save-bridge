@@ -287,9 +287,18 @@ class BridgeService:
                 )
                 progress(f"Copying farm to {prepared.target_device.title()}")
                 assert prepared.source.manifest is not None
-                replace_verified(
-                    target, prepared.staged_source, prepared.source.manifest, operation_id
-                )
+                if prepared.target_device == "ipad":
+                    self.usb.replace_verified(
+                        prepared.source.folder_id,
+                        prepared.staged_source,
+                        prepared.source.manifest,
+                        operation_id,
+                        destination.manifest if destination else None,
+                    )
+                else:
+                    replace_verified(
+                        target, prepared.staged_source, prepared.source.manifest, operation_id
+                    )
                 verified = True
             progress("Transfer verified")
             self.history.append(
@@ -424,12 +433,21 @@ class BridgeService:
                     prepared.operation_id, "writing_restore", farm=prepared.archive.folder_id
                 )
                 progress(f"Restoring farm on {prepared.target_device.title()}")
-                replace_verified(
-                    target_root / prepared.archive.folder_id,
-                    prepared.staged_source,
-                    prepared.archive.manifest,
-                    prepared.operation_id,
-                )
+                if prepared.target_device == "ipad":
+                    self.usb.replace_verified(
+                        prepared.archive.folder_id,
+                        prepared.staged_source,
+                        prepared.archive.manifest,
+                        prepared.operation_id,
+                        current.manifest if current else None,
+                    )
+                else:
+                    replace_verified(
+                        target_root / prepared.archive.folder_id,
+                        prepared.staged_source,
+                        prepared.archive.manifest,
+                        prepared.operation_id,
+                    )
                 verified = True
             progress("Restored farm verified")
             self.history.append(

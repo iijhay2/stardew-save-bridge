@@ -1,5 +1,9 @@
-import csv
+"""Direct USB access to one app's File Sharing Documents through AFC."""
+
+import json
 import os
+import plistlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -7,9 +11,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from save_bridge.errors import DeviceUnavailableError
+from save_bridge.errors import BridgeError, ChangedSaveError, DeviceUnavailableError
+from save_bridge.models import SaveManifest
+from save_bridge.services.save_scan import manifest_for
 
 TOOL_DIRECTORIES = (Path("/opt/homebrew/bin"), Path("/usr/local/bin"), Path("/opt/local/bin"))
+FARM_FOLDER = re.compile(r"[^./\\\r\n][^/\\\r\n]*_[0-9]+\Z")
 
 
 def resolve_tool(name: str) -> str | None:
@@ -24,32 +31,24 @@ def resolve_tool(name: str) -> str | None:
     return None
 
 
-def parse_shared_apps(output: str) -> list[tuple[str, str]]:
-    apps: list[tuple[str, str]] = []
-    for line in output.splitlines():
-        try:
-            cells = next(csv.reader([line], skipinitialspace=True))
-        except (csv.Error, StopIteration):
-            continue
-        if len(cells) >= 3 and "." in cells[0]:
-            apps.append((cells[0].strip(), cells[-1].strip()))
-    return apps
-
-
 class USBBridge:
     def __init__(self, staging_root: Path) -> None:
         self.staging_root = staging_root
 
     @staticmethod
-    def _run(command: list[str], timeout: int = 20) -> str:
+    def _run(command: list[str], timeout: int = 30) -> str:
         try:
             result = subprocess.run(
                 command, capture_output=True, text=True, timeout=timeout, check=False
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise DeviceUnavailableError(f"Could not run {Path(command[0]).name}: {exc}") from exc
-        if result.returncode:
-            detail = (result.stderr or result.stdout).strip()
+        detail = (result.stderr or result.stdout).strip()
+        # afcclient 1.4.0 sometimes exits zero after an AFC command fails.
+        if result.returncode or any(
+            line.lstrip().startswith(("Error:", "afcclient:"))
+            for line in (result.stdout + "\n" + result.stderr).splitlines()
+        ):
             raise DeviceUnavailableError(detail or f"{Path(command[0]).name} failed")
         return result.stdout
 
@@ -76,17 +75,21 @@ class USBBridge:
             ) from exc
 
     def stardew_app_id(self, device_id: str) -> str:
-        tool = resolve_tool("ifuse")
+        tool = resolve_tool("ideviceinstaller")
         if not tool:
-            raise DeviceUnavailableError(
-                "Install ifuse and macFUSE to read Stardew's shared Documents folder"
-            )
-        output = self._run([tool, "--list-apps", "--udid", device_id], timeout=40)
-        candidates = [
-            app_id
-            for app_id, name in parse_shared_apps(output)
-            if "stardew" in name.casefold() or "stardew" in app_id.casefold()
-        ]
+            raise DeviceUnavailableError("Install ideviceinstaller to find Stardew Valley")
+        output = self._run([tool, "--udid", device_id, "list", "--xml"], timeout=45)
+        try:
+            installed = plistlib.loads(output.encode())
+            candidates = [
+                app["CFBundleIdentifier"]
+                for app in installed
+                if isinstance(app, dict)
+                and app.get("UIFileSharingEnabled") is True
+                and "stardew" in str(app).casefold()
+            ]
+        except (ValueError, TypeError, KeyError, plistlib.InvalidFileException) as exc:
+            raise DeviceUnavailableError("Could not read the iPad app list") from exc
         if len(candidates) != 1:
             raise DeviceUnavailableError(
                 "Stardew Valley is not uniquely visible in iPad File Sharing. "
@@ -94,32 +97,114 @@ class USBBridge:
             )
         return candidates[0]
 
+    def _afc(self, device_id: str, app_id: str, *args: str, timeout: int = 120) -> str:
+        tool = resolve_tool("afcclient")
+        if not tool:
+            raise DeviceUnavailableError("Install libimobiledevice; afcclient is required")
+        return self._run(
+            [tool, "--udid", device_id, "--documents", app_id, "--", *args], timeout=timeout
+        )
+
+    def _remote_info(self, device_id: str, app_id: str, path: str) -> dict | None:
+        try:
+            return json.loads(self._afc(device_id, app_id, "info", path))
+        except DeviceUnavailableError as exc:
+            if "Not found (8)" in str(exc):
+                return None
+            raise
+        except (ValueError, TypeError) as exc:
+            raise DeviceUnavailableError("Unexpected iPad file information") from exc
+
     @contextmanager
     def mounted_documents(self) -> Iterator[tuple[Path, str, str]]:
+        """Read a temporary local snapshot; no filesystem driver or iPad write."""
         device_id = self.device_id()
         name = self.device_name(device_id)
         app_id = self.stardew_app_id(device_id)
         self.staging_root.mkdir(parents=True, exist_ok=True)
-        mountpoint = Path(tempfile.mkdtemp(prefix="ipad-", dir=self.staging_root))
-        mounted = False
+        root = Path(tempfile.mkdtemp(prefix="ipad-snapshot-", dir=self.staging_root))
         try:
-            tool = resolve_tool("ifuse")
-            if not tool:
-                raise DeviceUnavailableError("ifuse is no longer available")
-            self._run(
-                [tool, "--documents", app_id, str(mountpoint), "--udid", device_id], timeout=45
-            )
-            mounted = True
-            yield mountpoint, name, app_id
+            entries = self._afc(device_id, app_id, "ls", "/Documents", timeout=45)
+            for folder in entries.splitlines():
+                if FARM_FOLDER.fullmatch(folder):
+                    remote = f"/Documents/{folder}"
+                    info = self._remote_info(device_id, app_id, remote)
+                    if info and info.get("st_ifmt") == "S_IFDIR":
+                        self._afc(device_id, app_id, "get", "-r", remote, str(root), timeout=180)
+            yield root, name, app_id
         finally:
-            if mounted:
-                try:
-                    self._run(["/sbin/umount", str(mountpoint)], timeout=20)
-                except DeviceUnavailableError as exc:
-                    raise DeviceUnavailableError(
-                        f"Could not unmount iPad Documents safely: {exc}"
-                    ) from exc
+            shutil.rmtree(root, ignore_errors=True)
+
+    def replace_verified(
+        self,
+        folder_id: str,
+        staged_source: Path,
+        expected: SaveManifest,
+        operation_id: str,
+        old_manifest: SaveManifest | None,
+    ) -> None:
+        """Upload, read back, swap, and verify one farm over AFC."""
+        if not FARM_FOLDER.fullmatch(folder_id) or staged_source.name != folder_id:
+            raise BridgeError("Unsafe farm folder name")
+        if manifest_for(staged_source) != expected:
+            raise ChangedSaveError("Prepared farm changed before the iPad write")
+        device_id = self.device_id()
+        app_id = self.stardew_app_id(device_id)
+        target = f"/Documents/{folder_id}"
+        incoming = f"/Documents/.bridge-incoming-{operation_id}"
+        previous = f"/Documents/.bridge-previous-{operation_id}"
+        self.staging_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="ipad-verify-", dir=self.staging_root) as temp:
+            verify_root = Path(temp)
+            current = self._remote_info(device_id, app_id, target)
+            if (current is None) != (old_manifest is None):
+                raise ChangedSaveError("The iPad farm changed before the write")
+            if current:
+                self._afc(device_id, app_id, "get", "-r", target, str(verify_root), timeout=180)
+                if manifest_for(verify_root / folder_id) != old_manifest:
+                    raise ChangedSaveError("The iPad farm changed before the write")
+                shutil.rmtree(verify_root / folder_id)
+            if self._remote_info(device_id, app_id, incoming) or self._remote_info(
+                device_id, app_id, previous
+            ):
+                raise BridgeError("A prior iPad transfer stage needs inspection before retrying")
+            moved_old = False
+            swapped = False
             try:
-                mountpoint.rmdir()
-            except OSError:
-                pass
+                self._afc(
+                    device_id, app_id, "put", "-r", str(staged_source), incoming, timeout=180
+                )
+                self._afc(device_id, app_id, "get", "-r", incoming, str(verify_root), timeout=180)
+                if manifest_for(verify_root / Path(incoming).name) != expected:
+                    raise BridgeError("The uploaded iPad copy differs from the source")
+                shutil.rmtree(verify_root / Path(incoming).name)
+                if current:
+                    self._afc(device_id, app_id, "mv", target, previous)
+                    moved_old = True
+                self._afc(device_id, app_id, "mv", incoming, target)
+                swapped = True
+                self._afc(device_id, app_id, "get", "-r", target, str(verify_root), timeout=180)
+                if manifest_for(verify_root / folder_id) != expected:
+                    raise BridgeError("iPad verification failed after the write")
+                if moved_old:
+                    self._afc(device_id, app_id, "rm", "-rf", previous)
+            except Exception as exc:
+                if moved_old:
+                    try:
+                        if swapped:
+                            self._afc(device_id, app_id, "rm", "-rf", target)
+                        self._afc(device_id, app_id, "mv", previous, target)
+                    except DeviceUnavailableError as restore_exc:
+                        raise BridgeError(
+                            "iPad transfer failed and automatic restoration was interrupted. "
+                            f"Use the verified backup in History: {restore_exc}"
+                        ) from exc
+                elif swapped:
+                    self._afc(device_id, app_id, "rm", "-rf", target)
+                raise BridgeError(f"iPad transfer failed: {exc}") from exc
+            finally:
+                if not swapped:
+                    try:
+                        self._afc(device_id, app_id, "rm", "-rf", incoming)
+                    except DeviceUnavailableError:
+                        pass

@@ -39,7 +39,7 @@ print "Building the Mac app and launcher icon…"
 
 app_path="${BRIDGE_ARTIFACT_DIR:-$HOME/Applications}/Stardew Save Bridge.app"
 print "Installed: $app_path"
-if ! command -v idevice_id >/dev/null 2>&1 || ! command -v ifuse >/dev/null 2>&1; then
+if ! command -v idevice_id >/dev/null 2>&1 || ! command -v ideviceinstaller >/dev/null 2>&1 || ! command -v afcclient >/dev/null 2>&1; then
   print "iPad USB tools are still needed before transfers can be enabled."
   print "See: $project_root/docs/ipad-usb-setup.md"
 fi

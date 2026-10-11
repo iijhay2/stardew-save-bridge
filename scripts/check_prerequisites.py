@@ -8,7 +8,7 @@ from save_bridge.services.ipad import USBBridge, resolve_tool
 
 
 def main() -> None:
-    for tool in ("idevice_id", "ideviceinfo", "ifuse"):
+    for tool in ("idevice_id", "ideviceinfo", "ideviceinstaller", "afcclient"):
         path = resolve_tool(tool)
         print(f"{tool}: {path or 'missing'}")
     bridge = USBBridge(AppPaths.default().staging)
@@ -18,10 +18,10 @@ def main() -> None:
         print(f"Stardew shared app ID: {bridge.stardew_app_id(device_id)}")
         with bridge.mounted_documents() as (root, _name, _app_id):
             folders = [p.name for p in Path(root).iterdir() if p.is_dir()]
-            print(f"Shared Documents mounted; {len(folders)} folders visible")
+            print(f"Shared Documents readable; {len(folders)} farm folders visible")
             for folder in folders:
                 print(f"  {folder}")
-        print("Read-only USB check passed; Documents unmounted")
+        print("Read-only USB check passed; temporary snapshot removed")
     except DeviceUnavailableError as exc:
         print(f"USB check blocked: {exc}")
         raise SystemExit(1) from exc

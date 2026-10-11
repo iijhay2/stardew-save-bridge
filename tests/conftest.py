@@ -33,6 +33,11 @@ class FakeUSB:
     def mounted_documents(self):
         yield self.root, "Test iPad", "test.stardew"
 
+    def replace_verified(self, folder_id, staged_source, expected, operation_id, old_manifest):
+        from save_bridge.services.bridge import replace_verified
+
+        replace_verified(self.root / folder_id, staged_source, expected, operation_id)
+
 
 @pytest.fixture
 def farm_factory():

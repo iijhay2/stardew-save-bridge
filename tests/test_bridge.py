@@ -1,4 +1,5 @@
 import os
+import plistlib
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from save_bridge.app_paths import AppPaths
 from save_bridge.errors import BridgeError, ChangedSaveError
 from save_bridge.services.backup import BackupService
 from save_bridge.services.bridge import BridgeService, replace_verified
-from save_bridge.services.ipad import parse_shared_apps, resolve_tool
+from save_bridge.services.ipad import USBBridge, resolve_tool
 from save_bridge.services.save_scan import manifest_for, scan_root
 
 
@@ -178,18 +179,26 @@ def test_mac_restore_works_without_connected_ipad(tmp_path, farm_factory, monkey
     assert scan_root(service.mac_root, "mac")[0].money == 123456
 
 
-def test_shared_app_parser_uses_display_name_and_identifier():
-    output = 'com.example.notes, "1.0", "Notes"\ncom.chucklefish.stardewvalley, "1.6", "Stardew Valley"\n'
-    assert parse_shared_apps(output) == [
-        ("com.example.notes", "Notes"),
-        ("com.chucklefish.stardewvalley", "Stardew Valley"),
+def test_stardew_app_discovery_requires_file_sharing(tmp_path, monkeypatch):
+    apps = [
+        {"CFBundleIdentifier": "com.example.notes", "UIFileSharingEnabled": True},
+        {
+            "CFBundleIdentifier": "com.chucklefish.stardewvalley",
+            "CFBundleDisplayName": "Stardew Valley",
+            "UIFileSharingEnabled": True,
+        },
     ]
+    monkeypatch.setattr("save_bridge.services.ipad.resolve_tool", lambda _name: "tool")
+    monkeypatch.setattr(
+        USBBridge, "_run", staticmethod(lambda _cmd, timeout=30: plistlib.dumps(apps).decode())
+    )
+    assert USBBridge(tmp_path).stardew_app_id("device") == "com.chucklefish.stardewvalley"
 
 
 def test_finder_launch_can_resolve_usb_tools_outside_path(tmp_path, monkeypatch):
-    tool = tmp_path / "ifuse"
+    tool = tmp_path / "afcclient"
     tool.write_text("#!/bin/sh\nexit 0\n")
     tool.chmod(0o755)
     monkeypatch.setattr("save_bridge.services.ipad.shutil.which", lambda _name: None)
     monkeypatch.setattr("save_bridge.services.ipad.TOOL_DIRECTORIES", (tmp_path,))
-    assert resolve_tool("ifuse") == str(tool)
+    assert resolve_tool("afcclient") == str(tool)
