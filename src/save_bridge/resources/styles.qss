@@ -109,10 +109,10 @@ QPushButton#LinkButton {
     background: transparent;
     border: none;
     color: #4F6B56;
-    font-family: "Menlo";
-    font-size: 10px;
-    padding: 2px;
-    min-height: 16px;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px;
+    min-height: 22px;
     text-align: left;
 }
 QPushButton#LinkButton:hover { color: #213629; text-decoration: underline; }

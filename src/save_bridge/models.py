@@ -6,6 +6,10 @@ from typing import Literal
 Device = Literal["mac", "ipad"]
 
 
+def device_label(device: str) -> str:
+    return "iPad" if device == "ipad" else "Mac"
+
+
 @dataclass(frozen=True)
 class SaveFile:
     relative_path: str

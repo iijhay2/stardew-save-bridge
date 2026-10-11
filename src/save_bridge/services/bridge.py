@@ -8,7 +8,7 @@ from pathlib import Path
 
 from save_bridge.app_paths import AppPaths
 from save_bridge.errors import BridgeError, ChangedSaveError, OperationCancelled
-from save_bridge.models import Device, FarmSave, SaveManifest, ScanResult
+from save_bridge.models import Device, FarmSave, SaveManifest, ScanResult, device_label
 from save_bridge.services.backup import BackupInfo, BackupService
 from save_bridge.services.compatibility import compatibility_warning
 from save_bridge.services.history import HistoryService
@@ -186,13 +186,13 @@ class BridgeService:
                     )
                 warning = compatibility_warning(source, destination)
                 stage_root.mkdir(parents=True, exist_ok=False)
-                progress(f"Backing up {source.device.title()} farm")
+                progress(f"Saving a backup of your {device_label(source.device)} farm")
                 source_backup = self.backups.create(source, operation_id, cancelled)
                 target_backup = None
                 if destination is not None:
-                    progress(f"Backing up {destination.device.title()} farm")
+                    progress(f"Saving a backup of your {device_label(destination.device)} farm")
                     target_backup = self.backups.create(destination, operation_id, cancelled)
-                progress("Preparing and verifying transfer copy")
+                progress("Getting your farm ready")
                 if cancelled():
                     raise OperationCancelled("Preparation cancelled")
                 staged_source = stage_root / folder_id
@@ -257,7 +257,7 @@ class BridgeService:
                 self.backups.verify(prepared.destination_backup.path)
             if manifest_for(prepared.staged_source) != prepared.source.manifest:
                 raise BridgeError("Prepared save changed before writing")
-            progress("Rechecking connected farms")
+            progress("Checking for last-minute changes")
             with self._roots() as (mac_root, ipad_root, _device_name):
                 mac = scan_root(mac_root, "mac")
                 ipad = scan_root(ipad_root, "ipad")
@@ -285,7 +285,7 @@ class BridgeService:
                     farm=prepared.source.folder_id,
                     target=prepared.target_device,
                 )
-                progress(f"Copying farm to {prepared.target_device.title()}")
+                progress(f"Copying your farm to {device_label(prepared.target_device)}")
                 assert prepared.source.manifest is not None
                 if prepared.target_device == "ipad":
                     self.usb.replace_verified(
@@ -300,7 +300,7 @@ class BridgeService:
                         target, prepared.staged_source, prepared.source.manifest, operation_id
                     )
                 verified = True
-            progress("Transfer verified")
+            progress("Your farm is ready")
             self.history.append(
                 operation_id,
                 "succeeded",
@@ -352,7 +352,7 @@ class BridgeService:
         )
         try:
             ensure_game_closed()
-            progress("Verifying selected backup")
+            progress("Checking your saved copy")
             archive = self.backups.verify(archive_path)
             with self._restore_root(target_device) as target_root:
                 current = _find(scan_root(target_root, target_device), archive.folder_id)
@@ -370,7 +370,7 @@ class BridgeService:
                     current_backup = self.backups.create(current, operation_id)
                 stage_root.mkdir(parents=True, exist_ok=False)
                 staged_source = stage_root / archive.folder_id
-                progress("Extracting and verifying backup")
+                progress("Getting the saved copy ready")
                 self.backups.extract(archive, staged_source)
             target_location = (
                 str(self.mac_root / archive.folder_id)
@@ -417,7 +417,7 @@ class BridgeService:
                 self.backups.verify(prepared.destination_backup.path)
             if manifest_for(prepared.staged_source) != prepared.archive.manifest:
                 raise BridgeError("Prepared backup changed before writing")
-            progress("Rechecking destination farm")
+            progress("Checking for last-minute changes")
             with self._restore_root(prepared.target_device) as target_root:
                 current = _find(
                     scan_root(target_root, prepared.target_device), prepared.archive.folder_id
@@ -432,7 +432,7 @@ class BridgeService:
                 self.history.append(
                     prepared.operation_id, "writing_restore", farm=prepared.archive.folder_id
                 )
-                progress(f"Restoring farm on {prepared.target_device.title()}")
+                progress(f"Restoring your farm on {device_label(prepared.target_device)}")
                 if prepared.target_device == "ipad":
                     self.usb.replace_verified(
                         prepared.archive.folder_id,
@@ -449,7 +449,7 @@ class BridgeService:
                         prepared.operation_id,
                     )
                 verified = True
-            progress("Restored farm verified")
+            progress("Your farm is ready")
             self.history.append(
                 prepared.operation_id,
                 "restored",

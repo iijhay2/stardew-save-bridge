@@ -23,6 +23,7 @@ class BackupInfo:
     device: str
     manifest: SaveManifest
     created_at: str
+    farm_name: str = ""
 
 
 def _safe_relative(value: str) -> bool:
@@ -73,6 +74,7 @@ class BackupService:
         payload = {
             "format": 1,
             "folder_id": save.folder_id,
+            "farm_name": save.farm_name,
             "device": save.device,
             "created_at": created,
             "aggregate_sha256": save.manifest.aggregate_sha256,
@@ -92,7 +94,7 @@ class BackupService:
                 os.fsync(stream.fileno())
             self.verify(temp)
             os.replace(temp, path)
-            return BackupInfo(path, save.folder_id, save.device, save.manifest, created)
+            return BackupInfo(path, save.folder_id, save.device, save.manifest, created, save.farm_name)
         except (OSError, zipfile.BadZipFile, ValueError) as exc:
             raise BridgeError(f"Could not create a verified backup: {exc}") from exc
         finally:
@@ -125,7 +127,12 @@ class BackupService:
                     if digest.hexdigest() != item.sha256 or size != item.byte_count:
                         raise BridgeError(f"Backup verification failed for {item.relative_path}")
                 return BackupInfo(
-                    path, folder_id, str(raw["device"]), manifest, str(raw["created_at"])
+                    path,
+                    folder_id,
+                    str(raw["device"]),
+                    manifest,
+                    str(raw["created_at"]),
+                    str(raw.get("farm_name") or folder_id.rsplit("_", 1)[0]),
                 )
         except (
             OSError,

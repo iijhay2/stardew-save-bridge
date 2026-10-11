@@ -6,7 +6,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QRadioButton,
     QStyle,
     QStyledItemDelegate,
@@ -101,12 +100,12 @@ class CopyCard(QFrame):
         self.setObjectName("CopyCard")
         self.device = device
         self.save: FarmSave | None = None
-        self.setMinimumWidth(245)
+        self.setMinimumWidth(0)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(19, 19, 19, 18)
         layout.setSpacing(10)
         top = QHBoxLayout()
-        self.device_label = plain_label("MAC FARM" if device == "mac" else "IPAD FARM", "Eyebrow")
+        self.device_label = plain_label("ON YOUR MAC" if device == "mac" else "ON YOUR IPAD", "Eyebrow")
         self.status_label = plain_label("", "StatusWarn")
         self.status_label.setMinimumHeight(27)
         top.addWidget(self.device_label)
@@ -117,6 +116,9 @@ class CopyCard(QFrame):
         layout.addWidget(self.farm_label)
         self.money_label = plain_label("", "Money")
         layout.addWidget(self.money_label)
+        self.radio = QRadioButton(f"Use the {'Mac' if device == 'mac' else 'iPad'} copy")
+        self.radio.setAccessibleName(f"Use the {device} copy of this farm")
+        layout.addWidget(self.radio)
         self.player_label = plain_label("", "Muted")
         self.date_label = plain_label("", "Muted")
         self.modified_label = plain_label("", "Muted")
@@ -126,25 +128,7 @@ class CopyCard(QFrame):
         self.warning_label = plain_label("", "Warning")
         layout.addWidget(self.warning_label)
         layout.addStretch()
-        self.radio = QRadioButton("Use this copy as source")
-        self.radio.setAccessibleName(f"Use {device} copy as source")
-        layout.addWidget(self.radio)
-        self.details_toggle = QPushButton("Show technical details")
-        self.details_toggle.setObjectName("LinkButton")
-        self.details_toggle.setCheckable(True)
-        self.details_toggle.toggled.connect(self._toggle_details)
-        layout.addWidget(self.details_toggle, alignment=Qt.AlignmentFlag.AlignLeft)
-        self.details = plain_label("", "Muted")
-        self.details.setStyleSheet("font-family: Menlo; font-size: 10px;")
-        layout.addWidget(self.details)
-        self.details.hide()
         self.update_save(None)
-
-    def _toggle_details(self, checked: bool) -> None:
-        self.details.setVisible(checked and self.save is not None)
-        self.details_toggle.setText(
-            "Hide technical details" if checked else "Show technical details"
-        )
 
     def update_save(self, save: FarmSave | None) -> None:
         self.save = save
@@ -158,34 +142,28 @@ class CopyCard(QFrame):
             self.status_label.setObjectName("StatusWarn")
             self.status_label.setText("Empty")
             self.radio.setEnabled(False)
-            self.details.setText("")
-            self.details_toggle.hide()
         else:
             self.farm_label.setText(f"{save.farm_name} Farm")
             self.money_label.setText(money_text(save.money))
             self.player_label.setText(f"Farmer: {save.player_name or 'Unavailable'}")
             self.date_label.setText(f"In game: {save.in_game_date or 'Date unavailable'}")
             self.modified_label.setText(f"Saved: {date_text(save.modified_at)}")
-            self.warning_label.setText("\n".join(save.warnings))
-            self.warning_label.setVisible(bool(save.warnings))
-            self.status_label.setObjectName("StatusGood" if save.valid else "StatusWarn")
-            self.status_label.setText("Verified" if save.valid else "Incomplete")
-            self.radio.setEnabled(save.valid)
-            self.details_toggle.show()
-            self.details.setText(
-                f"Folder: {save.folder_id}\n"
-                f"Version: {save.game_version or 'Unknown'}  ·  "
-                f"Files: {save.manifest.file_count if save.manifest else '—'}\n"
-                f"Checksum: {save.manifest.aggregate_sha256[:12] if save.manifest else '—'}"
+            self.warning_label.setText(
+                "This copy needs attention. Open it in Stardew Valley and save again."
+                if not save.valid else ""
             )
+            self.warning_label.setVisible(not save.valid)
+            self.status_label.setObjectName("StatusGood" if save.valid else "StatusWarn")
+            self.status_label.setText("Ready" if save.valid else "Needs attention")
+            self.radio.setEnabled(save.valid)
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
 
     def show_unavailable(self, reason: str) -> None:
         self.update_save(None)
         self.farm_label.setText("iPad copy unavailable")
-        self.money_label.setText("Connect to inspect")
-        self.status_label.setText("Not scanned")
+        self.money_label.setText("Connect your iPad to see this copy")
+        self.status_label.setText("Not connected")
         self.warning_label.setText(reason)
         self.warning_label.show()
 

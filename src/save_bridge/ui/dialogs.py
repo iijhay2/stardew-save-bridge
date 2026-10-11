@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -13,7 +14,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from save_bridge.models import Device
+from save_bridge.models import Device, device_label
 from save_bridge.services.backup import BackupInfo
 from save_bridge.services.bridge import PreparedRestore, PreparedTransfer
 from save_bridge.ui.components import plain_label
@@ -58,64 +59,53 @@ class ProgressDialog(QDialog):
 class ConfirmationDialog(QDialog):
     def __init__(self, prepared: PreparedTransfer | PreparedRestore, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Review the exact change")
-        self.setMinimumWidth(565)
+        self.setWindowTitle("Confirm farm copy")
+        self.setMinimumWidth(440)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 27, 28, 25)
         layout.setSpacing(13)
-        layout.addWidget(plain_label("One last look", "Eyebrow"))
-        layout.addWidget(plain_label("Review the farm transfer", "PageTitle"))
+        layout.addWidget(plain_label("ONE LAST LOOK", "Eyebrow"))
         if isinstance(prepared, PreparedTransfer):
-            source = prepared.source.device.title()
-            target = prepared.target_device.title()
-            title = f"{prepared.source.farm_name} Farm: {source} → {target}"
+            source = device_label(prepared.source.device)
+            target = device_label(prepared.target_device)
+            title = f"Copy {prepared.source.farm_name} Farm?"
+            route = f"From your {source} to your {target}"
             effect = (
-                f"This will replace the existing {target} copy."
+                f"The {target} copy will be replaced with the {source} copy."
                 if prepared.destination
-                else f"This will create a new copy on {target}."
+                else f"A new copy will be added to your {target}."
             )
-            backups = f"Source backup: {prepared.source_backup.path}"
-            if prepared.destination_backup:
-                backups += f"\nDestination backup: {prepared.destination_backup.path}"
-            else:
-                backups += "\nDestination was empty; there is no previous folder to back up."
-            warning = prepared.warning
-            file_count = prepared.source.manifest.file_count if prepared.source.manifest else 0
-            source_path = prepared.source_location
-            target_path = prepared.target_location
+            backups = (
+                "Both copies have been backed up on this Mac. You can restore the earlier copy later."
+                if prepared.destination_backup
+                else "Your chosen copy has been backed up on this Mac."
+            )
         else:
-            target = prepared.target_device.title()
-            title = f"Restore {prepared.archive.folder_id} on {target}"
+            target = device_label(prepared.target_device)
+            title = f"Restore {prepared.archive.farm_name} Farm?"
+            route = f"From your backup to your {target}"
             effect = (
-                f"This will replace the existing {target} copy."
+                f"The current {target} copy will be replaced with this backup."
                 if prepared.destination
-                else f"This will create the farm on {target}."
+                else f"A new copy will be added to your {target}."
             )
-            backups = f"Selected archive: {prepared.archive.path}"
-            if prepared.destination_backup:
-                backups += f"\nCurrent farm backup: {prepared.destination_backup.path}"
-            else:
-                backups += "\nDestination was empty; there is no previous folder to back up."
-            warning = None
-            file_count = prepared.archive.manifest.file_count
-            source_path = str(prepared.archive.path)
-            target_path = prepared.target_location
-        layout.addWidget(plain_label(title, "SectionTitle"))
-        layout.addWidget(plain_label(effect, "Danger" if "replace" in effect else "Warning"))
+            backups = (
+                "The current copy has been backed up on this Mac, in case you want it back."
+                if prepared.destination_backup
+                else "This will add the farm without replacing another copy."
+            )
+        layout.addWidget(plain_label(title, "PageTitle"))
+        layout.addWidget(plain_label(route, "SectionTitle"))
+        replacing = prepared.destination is not None
+        layout.addWidget(plain_label(effect, "Danger" if replacing else "Warning"))
+        layout.addWidget(plain_label(backups, "Muted"))
         layout.addWidget(
-            plain_label(
-                f"Source: {source_path}\nTarget: {target_path}\nFiles: {file_count}", "Muted"
-            )
+            plain_label("Make sure Stardew Valley is up to date on both devices.", "Muted")
         )
-        if warning:
-            layout.addWidget(plain_label(warning, "Warning"))
-        backup_label = plain_label(backups, "Muted")
-        backup_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(backup_label)
         acknowledgement = (
-            "I checked the destination and closed Stardew Valley on my Mac."
+            "Stardew Valley is closed on my Mac, and this is the farm I want."
             if isinstance(prepared, PreparedRestore) and prepared.target_device == "mac"
-            else "I checked the destination and closed Stardew Valley on both devices."
+            else "Stardew Valley is closed on both devices, and this is the farm I want."
         )
         self.acknowledge = QCheckBox(acknowledgement)
         layout.addWidget(self.acknowledge)
@@ -124,8 +114,8 @@ class ConfirmationDialog(QDialog):
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
         buttons.addWidget(cancel)
-        self.confirm = QPushButton("Replace farm" if "replace" in effect else "Create farm copy")
-        self.confirm.setObjectName("DangerButton" if "replace" in effect else "Primary")
+        self.confirm = QPushButton(f"Replace {target} copy" if replacing else f"Copy to {target}")
+        self.confirm.setObjectName("DangerButton" if replacing else "Primary")
         self.confirm.setEnabled(False)
         self.acknowledge.toggled.connect(self.confirm.setEnabled)
         self.confirm.clicked.connect(self.accept)
@@ -136,34 +126,40 @@ class ConfirmationDialog(QDialog):
 class HistoryDialog(QDialog):
     def __init__(self, backups: list[BackupInfo], history: list[dict], parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Backups & history")
-        self.setMinimumSize(660, 500)
+        self.setWindowTitle("Your farm backups")
+        self.setMinimumSize(500, 420)
         self.backups = backups
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(12)
-        layout.addWidget(plain_label("Backups & history", "PageTitle"))
+        layout.addWidget(plain_label("Your farm backups", "PageTitle"))
         layout.addWidget(
             plain_label(
-                "Verified archives stay on this Mac until you delete them manually.", "Muted"
+                "Choose an earlier copy if you want to bring a farm back.", "Muted"
             )
         )
-        layout.addWidget(plain_label("Available backups", "SectionTitle"))
+        layout.addWidget(plain_label("Saved copies", "SectionTitle"))
         self.backup_list = QListWidget()
         for backup in backups:
+            try:
+                when = datetime.fromisoformat(backup.created_at).strftime("%b %d, %Y · %I:%M %p")
+            except ValueError:
+                when = "Earlier copy"
             item = QListWidgetItem(
-                f"{backup.folder_id}  ·  {backup.device.title()}  ·  {backup.created_at[:16]}\n{backup.path.name}"
+                f"{backup.farm_name} Farm  ·  {device_label(backup.device)}\n{when}"
             )
             item.setData(Qt.ItemDataRole.UserRole, str(backup.path))
             self.backup_list.addItem(item)
         layout.addWidget(self.backup_list, 2)
+        if not backups:
+            layout.addWidget(plain_label("Your farm backups will appear here after a transfer.", "Muted"))
         target_row = QHBoxLayout()
         target_row.addWidget(plain_label("Restore to:"))
         self.target = QComboBox()
         self.target.addItem("Mac", "mac")
         self.target.addItem("iPad", "ipad")
         target_row.addWidget(self.target)
-        self.restore_button = QPushButton("Review restore")
+        self.restore_button = QPushButton("Continue to restore")
         self.restore_button.setObjectName("DangerButton")
         self.restore_button.setEnabled(False)
         self.backup_list.currentRowChanged.connect(
@@ -172,11 +168,22 @@ class HistoryDialog(QDialog):
         target_row.addStretch()
         target_row.addWidget(self.restore_button)
         layout.addLayout(target_row)
-        layout.addWidget(plain_label("Recent operations", "SectionTitle"))
+        layout.addWidget(plain_label("Recent activity", "SectionTitle"))
         operations = QListWidget()
+        names = {backup.folder_id: backup.farm_name for backup in backups}
+        descriptions = {
+            "succeeded": "Copied",
+            "restored": "Restored",
+            "failed": "Stopped without finishing",
+            "cancelled": "Cancelled",
+        }
         for event in history:
+            status = str(event.get("status", ""))
+            if status not in descriptions:
+                continue
+            farm = names.get(str(event.get("farm", "")), "Farm")
             operations.addItem(
-                f"{event.get('at', '')[:16]}  ·  {event.get('status', '')}  ·  {event.get('farm', '')}"
+                f"{descriptions[status]} {farm} Farm  ·  {str(event.get('at', ''))[:10]}"
             )
         layout.addWidget(operations, 1)
         close = QPushButton("Close")

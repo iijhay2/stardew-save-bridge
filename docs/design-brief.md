@@ -15,5 +15,5 @@
 - Safety: no default source, visible destination consequence, verified backups, cancel before write.
 - Speed path: recent farm stays selected after refresh; keyboard selection and review action.
 - States: no Mac saves, no iPad, missing dependency, locked/untrusted iPad, scanning, changed save, backup failure, writing, verification failure, success, restore.
-- Narrow window: the farm list and comparison remain side by side at the supported 940 px minimum; actions stay visible without horizontal scrolling.
+- Narrow window: at widths below 900 px, show the farm list first, then a focused comparison with an All farms return button. The primary action stays visible below the scrolling comparison. The supported minimum is 620 × 520 px.
 - Evidence: select among multiple farms, compare money, keyboard review, failed/disconnected iPad, prepare/cancel, restore from backup.

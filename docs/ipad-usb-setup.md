@@ -1,23 +1,18 @@
-# iPad USB setup
+# Connect your iPad
 
-The app reads Stardew Valley's File Sharing Documents through [libimobiledevice's AFC/HouseArrest tools](https://github.com/libimobiledevice/libimobiledevice). It does not need macFUSE, ifuse, a mounted drive, or changes to Mac startup security.
+The installer includes the tools needed to read Stardew Valley's shared files over USB. No Mac security setting, filesystem driver, macFUSE, or ifuse is needed.
 
-1. Close Stardew Valley on both devices. Connect the iPad with a USB cable, unlock it, and tap **Trust This Computer** if prompted.
-2. Install the tools with [Homebrew](https://brew.sh/):
+1. Close Stardew Valley on the Mac and iPad.
+2. Connect the iPad with a USB data cable and unlock it.
+3. Tap **Trust This Computer** on the iPad if asked.
+4. Open **Stardew Save Bridge** and click **Refresh saves**. Select a farm and compare its name and money on both devices.
 
-   ```bash
-   brew install libimobiledevice ideviceinstaller
-   ```
+If the iPad still does not appear, unplug it and reconnect it, then run **Install Stardew Save Bridge.command** again. The installer checks and installs the USB tools. If Stardew Valley is missing from the app, open the game once on the iPad, create or save a farm, close it, and refresh.
 
-3. Check pairing: `idevice_id --list` should show one device and `idevicepair validate` should succeed.
-4. From the repository, run the read-only check:
+The app reads Stardew Valley's Documents folder through Apple's File Sharing connection using [libimobiledevice](https://github.com/libimobiledevice/libimobiledevice). It cannot read files that iPadOS keeps private. Advanced users can run the read-only connection check from the repository:
 
-   ```bash
-   PYTHONPATH=src .venv/bin/python scripts/check_prerequisites.py
-   ```
+```bash
+PYTHONPATH=src .venv/bin/python scripts/check_prerequisites.py
+```
 
-   It finds Stardew Valley by its File Sharing setting, downloads a temporary copy of visible farm folders to the Mac for inspection, and removes that copy after the check. It does not change the iPad.
-
-5. Open the app and click **Refresh saves**. Confirm the exact farm name and money on each device before preparing a transfer.
-
-If no farm appears, open the iPad's Files app or Finder File Sharing and check that Stardew Valley exposes Documents. The app cannot access a private game container or bypass the iPad sandbox.
+The check only reads visible farm folders and removes its temporary Mac copy afterward.

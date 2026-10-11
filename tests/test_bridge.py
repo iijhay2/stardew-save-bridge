@@ -41,6 +41,7 @@ def test_backup_round_trip_and_reject_corruption(tmp_path, farm_factory):
     backups = BackupService(tmp_path / "backups")
     archive = backups.create(save, "op1")
     assert backups.verify(archive.path).manifest == save.manifest
+    assert backups.verify(archive.path).farm_name == "Bluebell"
     extracted = tmp_path / "extracted"
     backups.extract(archive, extracted)
     assert manifest_for(extracted) == save.manifest

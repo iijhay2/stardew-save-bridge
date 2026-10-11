@@ -6,6 +6,7 @@ from typing import cast
 from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QButtonGroup,
     QFrame,
     QHBoxLayout,
@@ -16,12 +17,13 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
-from save_bridge.models import FarmSave, ScanResult
+from save_bridge.models import FarmSave, ScanResult, device_label
 from save_bridge.services.backup import BackupInfo
 from save_bridge.services.bridge import BridgeService, PreparedRestore, PreparedTransfer
 from save_bridge.ui.components import (
@@ -75,10 +77,12 @@ class BridgeWindow(QMainWindow):
         self._jobs: list[JobRun] = []
         self._busy = False
         self.setWindowTitle("Stardew Save Bridge — Farm Journal")
-        self.setMinimumSize(940, 650)
-        self.resize(1150, 760)
+        self.setMinimumSize(620, 520)
+        self.resize(1120, 760)
+        self._compact = False
         self._build_ui()
         self._build_menus()
+        self._apply_layout_mode()
         QTimer.singleShot(0, self.refresh)
 
     def _build_ui(self) -> None:
@@ -86,8 +90,9 @@ class BridgeWindow(QMainWindow):
         root.setObjectName("Root")
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
-        outer.setContentsMargins(26, 24, 26, 22)
-        outer.setSpacing(17)
+        self.outer = outer
+        outer.setContentsMargins(22, 20, 22, 16)
+        outer.setSpacing(12)
 
         hero = QFrame()
         hero.setObjectName("Hero")
@@ -98,7 +103,8 @@ class BridgeWindow(QMainWindow):
         hero_row.addWidget(icon)
         brand = QVBoxLayout()
         brand.setSpacing(1)
-        brand.addWidget(plain_label("YOUR FARM, SAFELY ON BOTH DEVICES", "Eyebrow"))
+        self.hero_eyebrow = plain_label("YOUR FARM, SAFELY ON BOTH DEVICES", "Eyebrow")
+        brand.addWidget(self.hero_eyebrow)
         brand.addWidget(plain_label("Farm Journal", "AppTitle"))
         hero_row.addLayout(brand)
         hero_row.addStretch()
@@ -106,22 +112,36 @@ class BridgeWindow(QMainWindow):
         hero_row.addWidget(self.connection)
         outer.addWidget(hero)
 
-        split = QSplitter(Qt.Orientation.Horizontal)
-        split.setChildrenCollapsible(False)
-        outer.addWidget(split, 1)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
+        outer.addWidget(self.splitter, 1)
 
         sidebar = QFrame()
         sidebar.setObjectName("Sidebar")
+        self.sidebar = sidebar
         side = QVBoxLayout(sidebar)
         side.setContentsMargins(16, 20, 16, 16)
         side.setSpacing(11)
-        side.addWidget(plain_label("YOUR SAVES", "Eyebrow"))
+        self.side_eyebrow = plain_label("YOUR SAVES", "Eyebrow")
+        side.addWidget(self.side_eyebrow)
         side.addWidget(plain_label("Choose a farm", "SectionTitle"))
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search farms or farmers")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._populate_farms)
         side.addWidget(self.search)
+        self.side_connection_hint = plain_label("", "Warning")
+        self.side_connection_hint.hide()
+        side.addWidget(self.side_connection_hint)
+        self.side_setup_button = QPushButton("How to connect your iPad")
+        self.side_setup_button.clicked.connect(self.show_setup)
+        self.side_setup_button.hide()
+        side.addWidget(self.side_setup_button)
+        self.list_empty = plain_label(
+            "No farms yet. Save a game on your Mac or iPad, then refresh.", "Muted"
+        )
+        self.list_empty.hide()
+        side.addWidget(self.list_empty)
         self.farms = QListWidget()
         self.farms.setItemDelegate(FarmItemDelegate(self.farms))
         self.farms.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -130,17 +150,28 @@ class BridgeWindow(QMainWindow):
         side.addWidget(self.farms, 1)
         self.list_hint = plain_label("Select the exact save you want to copy.", "Muted")
         side.addWidget(self.list_hint)
-        split.addWidget(sidebar)
+        self.side_refresh_button = QPushButton("Refresh saves")
+        self.side_refresh_button.clicked.connect(self.refresh)
+        self.side_refresh_button.hide()
+        side.addWidget(self.side_refresh_button)
+        self.splitter.addWidget(sidebar)
 
         workspace = QFrame()
         workspace.setObjectName("Workspace")
         work = QVBoxLayout(workspace)
+        self.work_layout = work
         work.setContentsMargins(24, 22, 24, 20)
         work.setSpacing(14)
+        self.back_button = QPushButton("← All farms")
+        self.back_button.setObjectName("LinkButton")
+        self.back_button.clicked.connect(self._back_to_farms)
+        self.back_button.hide()
+        work.addWidget(self.back_button, alignment=Qt.AlignmentFlag.AlignLeft)
         top = QHBoxLayout()
         title_stack = QVBoxLayout()
         title_stack.setSpacing(4)
-        title_stack.addWidget(plain_label("FARM COMPARISON", "Eyebrow"))
+        self.comparison_eyebrow = plain_label("FARM COMPARISON", "Eyebrow")
+        title_stack.addWidget(self.comparison_eyebrow)
         self.farm_title = plain_label("Pick a farm to begin", "PageTitle")
         title_stack.addWidget(self.farm_title)
         top.addLayout(title_stack)
@@ -184,7 +215,8 @@ class BridgeWindow(QMainWindow):
         work.addWidget(self.empty_card, 1)
 
         self.copies_widget = QWidget()
-        copies = QHBoxLayout(self.copies_widget)
+        copies = QBoxLayout(QBoxLayout.Direction.LeftToRight, self.copies_widget)
+        self.copies_layout = copies
         copies.setContentsMargins(0, 0, 0, 0)
         copies.setSpacing(13)
         self.mac_card = CopyCard("mac")
@@ -198,22 +230,80 @@ class BridgeWindow(QMainWindow):
         self.mac_card.radio.toggled.connect(self._update_actions)
         self.ipad_card.radio.toggled.connect(self._update_actions)
 
-        actions = QHBoxLayout()
-        self.history_button = QPushButton("Backups & history")
+        footer = QFrame()
+        footer.setObjectName("Footer")
+        actions = QHBoxLayout(footer)
+        actions.setContentsMargins(14, 8, 14, 8)
+        self.history_button = QPushButton("Farm backups")
         self.history_button.clicked.connect(self.show_history)
         actions.addWidget(self.history_button)
         actions.addStretch()
-        self.prepare_button = QPushButton("Choose a source copy")
+        self.prepare_button = QPushButton("Choose a copy above")
         self.prepare_button.setObjectName("Primary")
         self.prepare_button.setEnabled(False)
         self.prepare_button.setShortcut(QKeySequence("Meta+Return"))
         self.prepare_button.clicked.connect(self.prepare_transfer)
         actions.addWidget(self.prepare_button)
-        work.addLayout(actions)
-        split.addWidget(workspace)
-        split.setSizes([315, 800])
+        outer.addWidget(footer)
+        self.work_scroll = QScrollArea()
+        self.work_scroll.setObjectName("WorkScroll")
+        self.work_scroll.setWidgetResizable(True)
+        self.work_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.work_scroll.setWidget(workspace)
+        self.splitter.addWidget(self.work_scroll)
+        self.splitter.setSizes([315, 800])
         self.statusBar().showMessage("Ready")
         self._show_selected()
+
+    def _apply_layout_mode(self) -> None:
+        compact = self.width() < 900
+        if compact == self._compact:
+            return
+        self._compact = compact
+        self.splitter.setOrientation(
+            Qt.Orientation.Vertical if compact else Qt.Orientation.Horizontal
+        )
+        self.copies_layout.setDirection(QBoxLayout.Direction.LeftToRight)
+        margins = (10, 10, 10, 8) if compact else (22, 20, 22, 16)
+        self.outer.setContentsMargins(*margins)
+        work_margins = (14, 12, 14, 12) if compact else (24, 22, 24, 20)
+        self.work_layout.setContentsMargins(*work_margins)
+        self.hero_eyebrow.setVisible(not compact)
+        self.side_eyebrow.setVisible(not compact)
+        self.list_hint.setVisible(not compact)
+        self.side_refresh_button.setVisible(compact)
+        self.comparison_eyebrow.setVisible(not compact)
+        self.splitter.setSizes([185, 450] if compact else [315, 800])
+        self._update_compact_view()
+
+    def _update_compact_view(self) -> None:
+        blocked = self.scan_result.ipad_status not in ("Connected and ready", "Scanning…")
+        self.side_connection_hint.setVisible(self._compact and blocked)
+        self.side_setup_button.setVisible(self._compact and blocked)
+        if self._compact:
+            showing_farms = self.selected_folder is None
+            self.sidebar.setVisible(showing_farms)
+            self.work_scroll.setVisible(not showing_farms)
+            self.back_button.setVisible(not showing_farms)
+            self.prepare_button.setVisible(not showing_farms)
+            if not showing_farms:
+                self.work_scroll.verticalScrollBar().setValue(0)
+        else:
+            self.sidebar.show()
+            self.work_scroll.show()
+            self.back_button.hide()
+            self.prepare_button.show()
+
+    def _back_to_farms(self) -> None:
+        self.farms.setCurrentRow(-1)
+        self.selected_folder = None
+        self._show_selected()
+        self.search.setFocus()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "splitter"):
+            self._apply_layout_mode()
 
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu("File")
@@ -243,6 +333,7 @@ class BridgeWindow(QMainWindow):
             return
         self._busy = True
         self.refresh_button.setEnabled(False)
+        self.side_refresh_button.setEnabled(False)
         self.prepare_button.setEnabled(False)
         dialog = ProgressDialog(title, cancellable, self) if show_progress else None
         thread = QThread(self)
@@ -277,8 +368,41 @@ class BridgeWindow(QMainWindow):
     def _job_failed(self, message: str) -> None:
         run = self._run_for_sender(self.sender())
         if run:
-            run.error = message
+            run.error = self._friendly_error(message)
             run.thread.quit()
+
+    @staticmethod
+    def _friendly_error(message: str) -> str:
+        detail = message.casefold()
+        if "cancel" in detail:
+            return "Preparation cancelled. Existing farms were not changed."
+        if "automatic restoration" in detail:
+            return (
+                "The iPad disconnected while an earlier copy was being restored. "
+                "Check Farm backups before opening the game."
+            )
+        if "not enough free" in detail or "no space left" in detail:
+            return "This Mac needs more free space before the farm can be copied."
+        if "changed" in detail or "appeared" in detail:
+            return "A farm changed while you were choosing. Refresh your farms and try again."
+        if "stardew" in detail and ("running" in detail or "closed" in detail):
+            return "Close Stardew Valley on both devices, then try again."
+        if "connect" in detail or "device" in detail or "ipad" in detail:
+            return "The iPad connection was interrupted. Reconnect and unlock it, then refresh."
+        if "backup" in detail or "archive" in detail:
+            return "A farm backup could not be checked. Open Farm backups before trying again."
+        return "The farm could not be copied. Check Farm backups, then refresh and try again."
+
+    @staticmethod
+    def _friendly_connection_status(message: str) -> str:
+        detail = message.casefold()
+        if "install" in detail or ("available" in detail and "afcclient" in detail):
+            return "Setup needs to finish. Run the installer again, then refresh."
+        if "trust" in detail or "unlock" in detail:
+            return "Unlock your iPad and tap Trust This Computer, then refresh."
+        if "stardew valley" in detail or "file sharing" in detail:
+            return "Stardew Valley could not be found on this iPad. Open the game once, then refresh."
+        return "Connect and unlock your iPad with a USB cable, then refresh."
 
     @Slot()
     def _job_finished(self) -> None:
@@ -288,7 +412,9 @@ class BridgeWindow(QMainWindow):
         self._jobs.remove(run)
         self._busy = False
         self.refresh_button.setEnabled(True)
+        self.side_refresh_button.setEnabled(True)
         self._update_actions()
+        self._update_compact_view()
         if run.dialog:
             run.dialog.done(1)
         if run.error is not None:
@@ -303,8 +429,8 @@ class BridgeWindow(QMainWindow):
             run.success(run.result)
 
     def refresh(self) -> None:
-        self.connection.setText("Scanning iPad…")
-        self.statusBar().showMessage("Scanning farm folders…")
+        self.connection.setText("Looking for iPad…")
+        self.statusBar().showMessage("Looking for your farms…")
         self._run_job(
             "Scanning your farms",
             lambda _p, _c: self.service.scan(),
@@ -317,13 +443,14 @@ class BridgeWindow(QMainWindow):
         self.scan_result = result
         connected = result.ipad_status == "Connected and ready"
         self.connection.setObjectName("StatusGood" if connected else "StatusWarn")
-        self.connection.setText(
-            f"{result.ipad_device_name} connected" if connected else "iPad needs setup"
-        )
+        self.connection.setText("iPad connected" if connected else "Connect your iPad")
         self.connection.style().unpolish(self.connection)
         self.connection.style().polish(self.connection)
         self._populate_farms()
-        self.statusBar().showMessage("Scan complete" if connected else result.ipad_status, 10000)
+        self.statusBar().showMessage(
+            "Farms are ready" if connected else self._friendly_connection_status(result.ipad_status),
+            10000,
+        )
 
     def _all_ids(self) -> list[str]:
         saves = {
@@ -361,7 +488,7 @@ class BridgeWindow(QMainWindow):
                 f"{save.farm_name} Farm, Mac {mac_money}, iPad {ipad_money}",
             )
             item.setSizeHint(QSize(0, 88))
-            item.setToolTip(f"{folder_id}\nPlayer: {save.player_name or 'Unavailable'}")
+            item.setToolTip(f"{save.farm_name} Farm · {save.player_name or 'Farmer unknown'}")
             self.farms.addItem(item)
             if folder_id == selected:
                 self.farms.setCurrentItem(item)
@@ -372,10 +499,11 @@ class BridgeWindow(QMainWindow):
         ):
             self.selected_folder = None
         self.list_hint.setText(
-            f"{self.farms.count()} farm save{'s' if self.farms.count() != 1 else ''} found"
+            f"{self.farms.count()} farm{'s' if self.farms.count() != 1 else ''} found"
             if self.farms.count()
             else "No farms found. Start a farm in Stardew, then refresh."
         )
+        self.list_empty.setVisible(self.farms.count() == 0)
         self._show_selected()
 
     def _farm_selected(
@@ -397,7 +525,9 @@ class BridgeWindow(QMainWindow):
             "Connected and ready",
             "Scanning…",
         ):
-            self.ipad_card.show_unavailable(self.scan_result.ipad_status)
+            self.ipad_card.show_unavailable(
+                self._friendly_connection_status(self.scan_result.ipad_status)
+            )
         self.mac_card.set_active(False)
         self.ipad_card.set_active(False)
         if self.selected_folder:
@@ -406,9 +536,9 @@ class BridgeWindow(QMainWindow):
             self.farm_title.setText(f"{save.farm_name} Farm")
             if mac and ipad and mac.manifest and ipad.manifest:
                 self.summary.setText(
-                    "Both copies have identical files."
+                    "Both copies are identical."
                     if mac.manifest == ipad.manifest
-                    else "The copies differ. Choose the one you want to keep."
+                    else "These copies have different progress. Choose the one you want to keep."
                 )
             else:
                 self.summary.setText(
@@ -420,9 +550,14 @@ class BridgeWindow(QMainWindow):
                 "Your Mac farms appear here. Connect an unlocked iPad to compare copies."
             )
         blocked = self.scan_result.ipad_status not in ("Connected and ready", "Scanning…")
-        self.banner.setText(self.scan_result.ipad_status if blocked else "")
+        self.banner.setText(
+            self._friendly_connection_status(self.scan_result.ipad_status) if blocked else ""
+        )
         self.banner.setVisible(blocked)
         self.setup_button.setVisible(blocked)
+        self.side_connection_hint.setText(
+            self._friendly_connection_status(self.scan_result.ipad_status) if blocked else ""
+        )
         self.copies_widget.setVisible(self.selected_folder is not None)
         self.empty_card.setVisible(self.selected_folder is None)
         if self.selected_folder is None:
@@ -434,9 +569,10 @@ class BridgeWindow(QMainWindow):
             else:
                 self.empty_title.setText("No farms found yet")
                 self.empty_text.setText(
-                    "Save a farm in Stardew Valley on your Mac, then choose Refresh Saves."
+                    "Save a farm in Stardew Valley on either device, then choose Refresh saves."
                 )
         self._update_actions()
+        self._update_compact_view()
 
     def _update_actions(self) -> None:
         mac = self.mac_card.radio.isChecked()
@@ -447,12 +583,14 @@ class BridgeWindow(QMainWindow):
         enabled = bool(self.selected_folder and (mac or ipad) and ready and not self._busy)
         self.prepare_button.setEnabled(enabled)
         if mac:
-            self.prepare_button.setText("Prepare Mac → iPad")
+            self.prepare_button.setText("Continue: Mac → iPad")
         elif ipad:
-            self.prepare_button.setText("Prepare iPad → Mac")
+            self.prepare_button.setText("Continue: iPad → Mac")
         else:
-            self.prepare_button.setText("Choose a source copy")
-        self.prepare_button.setToolTip("" if ready else self.scan_result.ipad_status)
+            self.prepare_button.setText("Choose a copy above")
+        self.prepare_button.setToolTip(
+            "" if ready else self._friendly_connection_status(self.scan_result.ipad_status)
+        )
 
     def prepare_transfer(self) -> None:
         source = self.mac_card.save if self.mac_card.radio.isChecked() else self.ipad_card.save
@@ -476,7 +614,7 @@ class BridgeWindow(QMainWindow):
                 "Transferring farm",
                 lambda progress, _cancelled: self.service.execute(result, progress),
                 lambda _value: self._operation_done(
-                    f"{result.source.farm_name} Farm was copied and verified on {result.target_device.title()}.",
+                    f"{result.source.farm_name} Farm was copied to your {device_label(result.target_device)}.",
                     result.target_device,
                 ),
             )
@@ -486,7 +624,7 @@ class BridgeWindow(QMainWindow):
 
     def _operation_done(self, message: str, target_device: str) -> None:
         next_step = (
-            "Eject the iPad safely, then check the farm in Stardew's Load Game screen."
+            "You can disconnect your iPad now. Check the farm in Stardew Valley's Load Game screen."
             if target_device == "ipad"
             else "Check the farm in Stardew's Load Game screen on your Mac."
         )
@@ -538,7 +676,7 @@ class BridgeWindow(QMainWindow):
                 "Restoring farm",
                 lambda progress, _cancelled: self.service.execute_restore(result, progress),
                 lambda _value: self._operation_done(
-                    f"{result.archive.folder_id} was restored and verified on {result.target_device.title()}.",
+                    f"{result.archive.farm_name} Farm was restored on your {device_label(result.target_device)}.",
                     result.target_device,
                 ),
             )
@@ -550,10 +688,10 @@ class BridgeWindow(QMainWindow):
             self,
             "Connect your iPad",
             "1. Close Stardew Valley on both devices.\n"
-            "2. Connect and unlock your iPad with a USB cable.\n"
-            "3. Tap Trust This Computer if asked.\n"
-            "4. Install libimobiledevice and ideviceinstaller, then click Refresh Saves.\n\n"
-            "The app only opens Stardew Valley's File Sharing Documents folder.",
+            "2. Connect your iPad with a USB cable and unlock it.\n"
+            "3. Tap Trust This Computer on your iPad if asked.\n"
+            "4. Click Refresh saves.\n\n"
+            "If your iPad still does not appear, run Install Stardew Save Bridge again.",
         )
 
     def closeEvent(self, event) -> None:
